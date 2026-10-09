@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { appendFile } from 'node:fs/promises'
+import { appendFile, readFile, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { readRelease } from './prebuilt-cli.mjs'
 import { spawnSync } from 'node:child_process'
 import { resolvePreviewRefs, resolvePullRequestReference } from './preview-refs.mjs'
 import { evaluatePublishOn } from './publish-on.mjs'
@@ -33,9 +37,9 @@ function effectiveDryRun() {
 
 // Each Action selects exactly one CLI operation; there is no operation input.
 const operations = {
-  publish: 'site publish',
+  publish: 'site sync',
   preview: 'preview publish',
-  registry: 'registry register',
+  registry: 'registry sync',
   'app-deploy': 'app deploy',
 }
 
@@ -62,6 +66,7 @@ function buildArguments() {
   } else if (kind === 'publish') {
     args.push('--site', required('site'))
     flag(args, 'source', input('source'))
+    flag(args, 'ref', input('ref').trim())
     flag(args, 'config', input('config'))
     publishDryRun()
   } else {
@@ -133,16 +138,31 @@ async function main() {
   const fallbackSite = input('site').trim()
   let built
   let child
+  let cliMetadata
+  let metadataDirectory
 
   try {
     if (!cliPath) throw new Error('ARTIFACT_PAGES_CLI must name the built artifact-pages binary')
     built = buildArguments()
+    const release = readRelease(process.env.GITHUB_ACTION_PATH || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', built.kind))
+    metadataDirectory = await mkdtemp(path.join(process.env.RUNNER_TEMP || tmpdir(), 'artifact-pages-cli-'))
+    const metadataPath = path.join(metadataDirectory, 'metadata.json')
+    const childEnv = { ...process.env,
+      ARTIFACT_PAGES_CLI_METADATA: metadataPath,
+      ARTIFACT_PAGES_CLI_RANGE: release?.cliRange ?? '',
+      ARTIFACT_PAGES_CLI_SKIP_RESOLUTION: release ? '' : '1',
+      ARTIFACT_PAGES_TRUSTED_CONFIG_REF: built.kind === 'preview' ? process.env.ARTIFACT_PAGES_TRUSTED_CONFIG_REF ?? '' : '',
+    }
+    if (release) delete childEnv.ARTIFACT_PAGES_TEST_CLI
+    if (!childEnv.ARTIFACT_PAGES_CLI_VERSION) childEnv.ARTIFACT_PAGES_CLI_VERSION = input('cli-version').trim()
     child = spawnSync(cliPath, built.args, {
       cwd: process.env.GITHUB_WORKSPACE || process.cwd(),
-      env: process.env,
+      env: childEnv,
       encoding: 'utf8',
       maxBuffer: 16 * 1024 * 1024,
     })
+    try { cliMetadata = JSON.parse(await readFile(metadataPath, 'utf8')) } catch { /* unavailable if the process never started */ }
+    await rm(metadataDirectory, { recursive: true, force: true })
     if (child.error) throw child.error
     if (built.dryRunReason && built.dryRunReason !== 'dry-run input is true') {
       process.stderr.write(`::notice title=Artifact Pages dry-run::${built.dryRunReason}; running as a dry-run.\n`)
@@ -159,7 +179,7 @@ async function main() {
     }
     process.stdout.write(`${JSON.stringify(result)}\n`)
     await writeOutputs(result, exitCode, fallbackSite)
-    await writeSummary({ kind: built?.kind ?? process.env.ARTIFACT_PAGES_ACTION_KIND, operation, result, exitCode })
+    await writeSummary({ kind: built?.kind ?? process.env.ARTIFACT_PAGES_ACTION_KIND, operation, result, exitCode, cliMetadata })
     process.exitCode = exitCode
     return
   }
@@ -176,6 +196,7 @@ async function main() {
     exitCode,
     dryRun: built.args.includes('--dry-run'),
     dryRunReason: built.dryRunReason,
+    cliMetadata,
   })
   process.exitCode = exitCode
 }

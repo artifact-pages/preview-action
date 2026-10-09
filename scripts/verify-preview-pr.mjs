@@ -184,6 +184,32 @@ export async function verifyPreviewTrust(options = {}) {
   return { explicit: true, pullRequestURL: metadata.url, headSHA: metadata.headSha }
 }
 
+// Trust has already been checked before this helper is called. Fetch only the
+// selected base object; config bytes and CLI downloads remain untouched here.
+export function ensureTrustedBase(cwd, reference, env = process.env) {
+  let result = spawnSync('git', ['rev-parse', '--verify', '--end-of-options', `${reference}^{commit}`], { cwd, encoding: 'utf8' })
+  if (result.status === 0 && shaPattern.test(result.stdout.trim())) return result.stdout.trim()
+  const branch = /^origin\/([^\s:^~?*\[\\]+)$/.exec(reference ?? '')
+  if (!shaPattern.test(reference ?? '') && (!branch || reference.includes('..'))) throw new Error('trusted config base must be a full commit SHA or origin branch')
+  const fetchEnv = { ...env }
+  delete fetchEnv.GITHUB_TOKEN
+  delete fetchEnv.GH_TOKEN
+  const origin = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8' })
+  const header = origin.status === 0 ? spawnSync('git', ['config', '--get-urlmatch', 'http.extraheader', origin.stdout.trim()], { cwd, encoding: 'utf8' }) : undefined
+  // Ignore caller Git config injection; the header is scoped to GitHub HTTPS.
+  fetchEnv.GIT_CONFIG_COUNT = '0'
+  if (env.ARTIFACT_PAGES_FETCH_TOKEN && !header?.stdout.trim()) {
+    fetchEnv.GIT_CONFIG_COUNT = '1'
+    fetchEnv.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader'
+    fetchEnv.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${env.ARTIFACT_PAGES_FETCH_TOKEN}`).toString('base64')}`
+  }
+  const fetch = spawnSync('git', ['fetch', '--no-tags', '--depth=1', 'origin', branch ? `${branch[1] === 'HEAD' ? 'HEAD' : `refs/heads/${branch[1]}`}:refs/remotes/origin/${branch[1]}` : reference], { cwd, env: fetchEnv, encoding: 'utf8' })
+  if (fetch.status !== 0) throw new Error('could not fetch the trusted config base commit; check default ref and workflow repository permissions')
+  result = spawnSync('git', ['rev-parse', '--verify', '--end-of-options', `${shaPattern.test(reference) ? reference : 'FETCH_HEAD'}^{commit}`], { cwd, encoding: 'utf8' })
+  if (result.status !== 0 || !shaPattern.test(result.stdout.trim())) throw new Error('trusted config base did not resolve to a full commit SHA')
+  return result.stdout.trim()
+}
+
 async function main() {
   try {
     const result = await verifyPreviewTrust()
@@ -192,7 +218,6 @@ async function main() {
     } else {
       process.stdout.write('Preview trust preflight passed; no pull-request provenance was requested.\n')
     }
-    await appendStepOutputs({ trusted: 'true' })
     let refs
     let reachable
     try {
@@ -202,6 +227,15 @@ async function main() {
       error.label = 'Preview Git ref check failed'
       throw error
     }
+    let trustedConfigRef = reachable.defaultRefSHA
+    if (process.env.GITHUB_EVENT_NAME === 'pull_request') {
+      const event = JSON.parse(await (await import('node:fs/promises')).readFile(process.env.GITHUB_EVENT_PATH, 'utf8'))
+      const baseSha = event.pull_request?.base?.sha
+      if (!shaPattern.test(baseSha ?? '')) throw new Error('pull_request event is missing a valid trusted base SHA for config resolution')
+      trustedConfigRef = baseSha
+    }
+    trustedConfigRef = ensureTrustedBase(process.env.GITHUB_WORKSPACE || process.cwd(), trustedConfigRef || refs.defaultRef)
+    await appendStepOutputs({ trusted: 'true', 'trusted-config-ref': trustedConfigRef })
     const known = (sha) => sha || 'fetched by the CLI'
     process.stdout.write(`Preview head ${refs.head} (${refs.headSource}) -> ${known(reachable.headSHA)}; default ref ${refs.defaultRef} (${refs.defaultRefSource}) -> ${known(reachable.defaultRefSHA)}; the CLI deepens a shallow checkout to the exact merge base.\n`)
   } catch (error) {

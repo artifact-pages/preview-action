@@ -1,17 +1,13 @@
 import { createHash } from 'node:crypto'
 import { chmodSync, copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { writeSummary } from './summary.mjs'
+import { requireCliRange, parseVersion } from './cli-range.mjs'
 import { pathToFileURL } from 'node:url'
 
-// CLI installation for the published composite Actions (TD14). A published Action
-// repository carries a generated `release.json` naming the product version and the
-// repository whose release holds the CLI. The Action always installs exactly that
-// CLI, checksum-verified, so the Action version (also under a SHA pin) decides the
-// CLI version. There is no source build and no fallback.
-//
-// Unreleased source (this monorepo's actions/<name>, no release.json) cannot name a
-// release. CI exercises it with a CLI built in the job, passed as
-// ARTIFACT_PAGES_TEST_CLI; that variable is ignored by every published Action.
+// Published Actions install their checksum-verified bootstrap CLI. The CLI resolves
+// merged config pins and re-executes a supported target from official releases.
+// Unreleased source alone may use ARTIFACT_PAGES_TEST_CLI.
 
 // Platforms the release workflow builds and the Actions can run. Windows is not
 // built, so the Actions do not support Windows runners.
@@ -49,9 +45,11 @@ export function readRelease(actionRoot) {
     throw error
   }
   const release = JSON.parse(text)
-  if (release.schemaVersion !== 1 || !/^\d+\.\d+\.\d+$/.test(release.version ?? '')) throw new Error('release.json does not name a release version')
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(release.repository ?? '') || release.repository.split('/').some((part) => part === '.' || part === '..')) throw new Error('release.json does not name a release repository')
-  return { version: release.version, repository: release.repository }
+  if (release.schemaVersion !== 2) throw new Error('release.json must use schemaVersion 2')
+  parseVersion(release.actionVersion)
+  requireCliRange(release.bootstrapCli, release.cliRange)
+  if (release.repository !== 'artifact-pages/artifact-pages') throw new Error('release.json must name the official CLI release repository')
+  return release
 }
 
 // Returns { version, tag, repository, asset, ... }; throws for an unsupported runner.
@@ -59,7 +57,10 @@ export function selectPrebuilt({ release, runnerOs, runnerArch: arch }) {
   const os = runnerOS[runnerOs]
   const cpu = runnerArch[arch]
   if (!os || !cpu) throw new Error(`no released CLI for runner ${runnerOs || '(unknown)'}/${arch || '(unknown)'}; use a Linux or macOS runner`)
-  const { version, repository } = release
+  const version = release.bootstrapCli
+  requireCliRange(version, release.cliRange)
+  const { repository } = release
+  if (repository !== 'artifact-pages/artifact-pages') throw new Error('CLI release repository must be official')
   const tag = `v${version}`
   const base = `https://github.com/${repository}/releases/download/${tag}/`
   const asset = assetName(version, os, cpu)
@@ -145,14 +146,15 @@ async function main() {
     let result
     if (release) {
       if (env.ARTIFACT_PAGES_TEST_CLI) process.stdout.write('::notice title=Artifact Pages CLI::ARTIFACT_PAGES_TEST_CLI is ignored by a published Action.\n')
-      result = await installPrebuilt({ release, runnerOs: env.RUNNER_OS, runnerArch: env.RUNNER_ARCH, destination, token: env.ARTIFACT_PAGES_TOKEN ?? '' })
+      result = await installPrebuilt({ release, runnerOs: env.RUNNER_OS, runnerArch: env.RUNNER_ARCH, destination, token: env.ARTIFACT_PAGES_DOWNLOAD_TOKEN ?? '' })
       process.stdout.write(`Artifact Pages CLI v${result.version}: ${result.reason}.\n`)
     } else {
       result = installTestCli({ testCli: env.ARTIFACT_PAGES_TEST_CLI, destination })
       process.stdout.write(`Artifact Pages CLI: ${result.reason}.\n`)
     }
   } catch (error) {
-    process.stderr.write(`::error title=Artifact Pages CLI::${String(error.message).replace(env.ARTIFACT_PAGES_TOKEN || '\u0000', '***')}\n`)
+    process.stderr.write(`::error title=Artifact Pages CLI::${String(error.message).replace(env.ARTIFACT_PAGES_DOWNLOAD_TOKEN || '\u0000', '***')}\n`)
+    await writeSummary({ kind: env.ARTIFACT_PAGES_ACTION_KIND, operation: 'CLI installation', result: { outcome: 'failed', error: 'Could not install the verified bootstrap CLI.' }, exitCode: 1, cliExecutionStarted: false, cliOverrideRequested: env.ARTIFACT_PAGES_CLI_VERSION || env.ARTIFACT_PAGES_INPUT_CLI_VERSION || '' })
     process.exitCode = 1
   }
 }

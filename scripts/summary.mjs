@@ -48,7 +48,7 @@ function idList(ids) {
 }
 
 // Returns the Markdown appended to GITHUB_STEP_SUMMARY.
-export function renderSummary({ kind, operation, result, exitCode = 0, dryRun = false, dryRunReason = '' }) {
+export function renderSummary({ kind, operation, result, exitCode = 0, dryRun = false, dryRunReason = '', cliMetadata, cliExecutionStarted, cliOverrideRequested }) {
   const changes = Array.isArray(result?.changes) ? result.changes : []
   const outcome = result?.outcome ?? 'failed'
   const name = result?.operation || operation || 'artifact-pages'
@@ -57,17 +57,19 @@ export function renderSummary({ kind, operation, result, exitCode = 0, dryRun = 
   if (result?.site) lines.push(`- **Site:** ${code(result.site)}`)
   if (dryRun) lines.push(`- **Mode:** dry-run${dryRunReason && dryRunReason !== 'dry-run input is true' ? ` (${oneLine(dryRunReason)})` : ''}`)
 
-  if (name === 'site publish') {
+  if (name === 'site sync') {
     lines.push(`- **Changes:** ${changes.length}${breakdown(changes)}`)
     const pruned = (Array.isArray(result?.previewChanges) ? result.previewChanges : []).filter((change) => change.action === 'remove').length
     lines.push(`- **Pruned previews:** ${pruned}`)
-  } else if (name === 'registry register') {
+  } else if (name === 'registry sync') {
     lines.push(`- **Registered:** ${idList(siteIDsFromRegistryChanges(changes, ['create', 'update']))}`)
     lines.push(`- **Removed:** ${idList(siteIDsFromRegistryChanges(changes, ['remove']))}`)
     if (typeof result?.registryUpdated === 'boolean') lines.push(`- **Registry updated:** ${result.registryUpdated}`)
   } else if (name === 'app deploy') {
     lines.push(`- **Object changes:** ${changes.length}`)
     if (result?.version) lines.push(`- **Version:** ${code(result.version)}`)
+  } else if (name === 'app remove') {
+    lines.push(`- **Removed application files:** ${Number(result?.filesRemoved ?? 0)}`)
   } else if (name === 'preview publish') {
     if (result?.groupListUrl) lines.push(`- **Preview list:** ${result.groupListUrl}`)
     const documents = Array.isArray(result?.documents) ? result.documents : []
@@ -87,6 +89,15 @@ export function renderSummary({ kind, operation, result, exitCode = 0, dryRun = 
     lines.push('', `> **Error (exit ${exitCode}):** ${oneLine(result?.error || 'the operation failed without an error message')}`)
   }
   if (name !== 'preview publish') lines.push(...changeList(changes))
+  if (cliExecutionStarted === false) {
+    lines.push('', '- **CLI executed:** none (installation failed)')
+    if (cliOverrideRequested) lines.push(`- **CLI override requested:** ${code(cliOverrideRequested)}`)
+  }
+  if (cliMetadata?.schemaVersion === 1 && cliMetadata.cliVersion) {
+    lines.push('', `- **CLI executed:** ${code(cliMetadata.cliVersion)}`)
+    if (cliMetadata.override) lines.push(`- **CLI override:** ${code(cliMetadata.overrideSource || 'environment')}${cliMetadata.configVersion ? ` (config ${code(cliMetadata.configVersion)})` : ''}`)
+    else if (cliMetadata.overrideRequested) lines.push(`- **CLI override requested:** ${code(cliMetadata.overrideRequested)}${cliMetadata.overrideSource ? ` (${code(cliMetadata.overrideSource)})` : ''}`)
+  }
   return `${lines.join('\n')}\n`
 }
 

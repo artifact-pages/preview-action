@@ -78,7 +78,7 @@ export function assertPreviewRefsReachable(cwd, refs) {
 
 function fetchableDefaultRef(ref) {
   const name = String(ref).replace(/^refs\/remotes\//, '')
-  return name.startsWith('origin/') && name !== 'origin/HEAD' && !/[\s:^~?*[\\]/.test(name) && !name.includes('..')
+  return name.startsWith('origin/') && !/[\s:^~?*[\\]/.test(name) && !name.includes('..')
 }
 
 // Resolves the Action's `pull-request` input. An explicit value always wins and

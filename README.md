@@ -1,4 +1,4 @@
-> This repository is generated from [artifact-pages/artifact-pages](https://github.com/artifact-pages/artifact-pages) (`actions/preview`) on every release. Open issues and pull requests there.
+> This repository is generated from [artifact-pages/artifact-pages](https://github.com/artifact-pages/artifact-pages) (`actions/preview`) on its component release. Open issues and pull requests there.
 
 # Artifact Pages preview
 
@@ -37,6 +37,7 @@ jobs:
 | `include` | empty | Newline-separated extra non-document resources. |
 | `base-url` | config `publicBaseURL` | Public application origin for review URLs. |
 | `config` | empty | Deployment config path or `github://` locator. |
+| `cli-version` | empty | Exact supported CLI override; environment overrides take precedence. |
 | `github-token` | `github.token` | Token with `pull-requests: read` (and `write` for comments). |
 | `dry-run` | `false` | Plan without writes. |
 | `comment` | `false` | Create or update one PR comment per site with the preview links. |
@@ -50,7 +51,7 @@ jobs:
 
 ## Version and runners
 
-The version of this Action is the version of the `artifact-pages` CLI it runs. The Action downloads `artifact-pages_v<version>_<os>_<arch>` from the matching [release of artifact-pages/artifact-pages](https://github.com/artifact-pages/artifact-pages/releases), verifies it against the release checksums and fails if it cannot. This also holds when you pin the Action to a full commit SHA. Pin an exact release tag (`@v0.1.0`) or a full commit SHA with the tag in a comment; no moving major tag is published while the product is `0.x`.
+The Action version describes its wrapper. Its generated `release.json` declares a checksum-verified bootstrap CLI and the supported range `>=0.1.0 <0.2.0`. The bootstrap resolves `cli.version` from the deployment config; `cli-version` can override it within that range without bypassing compatibility checks. The Job Summary records the actual CLI and any override, including failed operations. CLI downloads use only official Artifact Pages releases and the workflow token; the private-config token is never used for downloads.
 
 Supported runners: Linux and macOS, x64 and arm64. Windows runners are not supported.
 

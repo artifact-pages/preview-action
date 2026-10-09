@@ -17,7 +17,7 @@ inputs:
     required: false
     default: ""
   default-ref:
-    description: Default-branch ref used for merge-base selection. When empty, a pull_request event uses origin/<base ref>; any other event uses origin/HEAD. A shallow checkout is enough, because the CLI fetches a missing origin/<branch> at depth 1 and deepens to the merge base.
+    description: Default-branch ref used for merge-base selection. When empty, a pull_request event uses origin/<base ref>; any other event uses origin/HEAD. A shallow checkout is enough, because the trust preflight fetches a missing default ref at depth 1 and the CLI deepens to the merge base.
     required: false
     default: ""
   pull-request:
@@ -34,6 +34,10 @@ inputs:
     default: ""
   config:
     description: Optional deployment config path or github:// config locator.
+    required: false
+    default: ""
+  cli-version:
+    description: Override the config CLI pin with an exact supported release; compatibility checks still run.
     required: false
     default: ""
   github-token:
@@ -114,14 +118,18 @@ runs:
         ARTIFACT_PAGES_INPUT_PULL_REQUEST: ${{ inputs.pull-request }}
         ARTIFACT_PAGES_INPUT_HEAD: ${{ inputs.head }}
         ARTIFACT_PAGES_INPUT_DEFAULT_REF: ${{ inputs.default-ref }}
+        ARTIFACT_PAGES_FETCH_TOKEN: ${{ github.token }}
         ARTIFACT_PAGES_INPUT_SUMMARY: ${{ inputs.summary }}
         GITHUB_TOKEN: ${{ inputs.github-token || github.token }}
       run: node "$GITHUB_ACTION_PATH/scripts/verify-preview-pr.mjs"
-    - name: Install the CLI that matches this Action version
+    - name: Install the bootstrap CLI
       id: install
       shell: bash
       env:
-        ARTIFACT_PAGES_TOKEN: ${{ github.token }}
+        ARTIFACT_PAGES_ACTION_KIND: preview
+        ARTIFACT_PAGES_INPUT_CLI_VERSION: ${{ inputs.cli-version }}
+        ARTIFACT_PAGES_INPUT_SUMMARY: ${{ inputs.summary }}
+        ARTIFACT_PAGES_DOWNLOAD_TOKEN: ${{ github.token }}
       run: node "$GITHUB_ACTION_PATH/scripts/prebuilt-cli.mjs" --action-root "$GITHUB_ACTION_PATH"
     - name: Run the preview CLI operation
       id: cli
@@ -130,6 +138,9 @@ runs:
       env:
         ARTIFACT_PAGES_CLI: ${{ runner.temp }}/artifact-pages
         ARTIFACT_PAGES_ACTION_KIND: preview
+        ARTIFACT_PAGES_TRUSTED_CONFIG_REF: ${{ steps.preflight.outputs['trusted-config-ref'] }}
+        ARTIFACT_PAGES_INPUT_CLI_VERSION: ${{ inputs.cli-version }}
+        ARTIFACT_PAGES_DOWNLOAD_TOKEN: ${{ github.token }}
         ARTIFACT_PAGES_INPUT_SITE: ${{ inputs.site }}
         ARTIFACT_PAGES_INPUT_SOURCE: ${{ inputs.source }}
         ARTIFACT_PAGES_INPUT_HEAD: ${{ inputs.head }}
