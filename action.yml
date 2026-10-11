@@ -40,10 +40,6 @@ inputs:
     description: Override the config CLI pin with an exact supported release; compatibility checks still run.
     required: false
     default: ""
-  github-token:
-    description: Optional token with pull-requests:read for explicit PR verification and read-only private config access.
-    required: false
-    default: ""
   dry-run:
     description: Calculate changes without provider writes, lock acquisition, deletes, or cache changes.
     required: false
@@ -57,7 +53,7 @@ inputs:
     required: false
     default: "true"
   checkout:
-    description: "auto (default): run actions/checkout when the workspace is not already a Git checkout. true: always check out. false: never. On a pull_request event it checks out the base ref, never the pull-request head. Uses the workflow token with persist-credentials: false, never the github-token input."
+    description: "auto (default): run actions/checkout when the workspace is not already a Git checkout. true: always check out. false: never. On a pull_request event it checks out the base ref, never the pull-request head. Uses the workflow token with persist-credentials: false."
     required: false
     default: auto
   fetch-depth:
@@ -120,7 +116,7 @@ runs:
         ARTIFACT_PAGES_INPUT_DEFAULT_REF: ${{ inputs.default-ref }}
         ARTIFACT_PAGES_FETCH_TOKEN: ${{ github.token }}
         ARTIFACT_PAGES_INPUT_SUMMARY: ${{ inputs.summary }}
-        GITHUB_TOKEN: ${{ inputs.github-token || github.token }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: node "$GITHUB_ACTION_PATH/scripts/verify-preview-pr.mjs"
     - name: Install the bootstrap CLI
       id: install
@@ -151,8 +147,8 @@ runs:
         ARTIFACT_PAGES_INPUT_CONFIG: ${{ inputs.config }}
         ARTIFACT_PAGES_INPUT_DRY_RUN: ${{ inputs.dry-run }}
         ARTIFACT_PAGES_INPUT_SUMMARY: ${{ inputs.summary }}
-        GITHUB_TOKEN: ${{ inputs.github-token || github.token }}
-        # Used only by the CLI to deepen a shallow checkout from this repository; never the github-token input, which may be scoped to a separate config repository.
+        GITHUB_TOKEN: ${{ github.token }}
+        # Used only by the CLI's git-history fetch subprocess; config/API requests use GITHUB_TOKEN.
         ARTIFACT_PAGES_FETCH_TOKEN: ${{ github.token }}
       run: node "$GITHUB_ACTION_PATH/scripts/invoke-cli.mjs"
     - name: Create or update the preview pull-request comment
@@ -166,5 +162,5 @@ runs:
         ARTIFACT_PAGES_INPUT_PULL_REQUEST: ${{ inputs.pull-request }}
         ARTIFACT_PAGES_COMMENT_RESULT: ${{ steps.cli.outputs.result || steps.preflight.outputs.result }}
         ARTIFACT_PAGES_COMMENT_EXIT_CODE: ${{ steps.cli.outputs['exit-code'] || steps.preflight.outputs['exit-code'] }}
-        GITHUB_TOKEN: ${{ inputs.github-token || github.token }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: node "$GITHUB_ACTION_PATH/scripts/preview-comment.mjs"
