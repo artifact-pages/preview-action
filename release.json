@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "actionVersion": "0.2.0",
-  "bootstrapCli": "0.4.0",
-  "cliRange": ">=0.4.0 <0.5.0",
+  "actionVersion": "0.3.0",
+  "bootstrapCli": "0.5.0",
+  "cliRange": ">=0.5.0 <0.6.0",
   "repository": "artifact-pages/artifact-pages"
 }
